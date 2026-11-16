@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.macrdp.xrdp</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/mac-rdp/sbin/xrdp</string>
+        <string>--nodaemon</string>
+        <string>--config</string>
+        <string>/opt/mac-rdp/etc/xrdp/xrdp.ini</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <!-- Restart automatically if xrdp crashes -->
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>/opt/mac-rdp/var/log/xrdp-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/opt/mac-rdp/var/log/xrdp-stderr.log</string>
+
+    <!-- Scroll tuning (patches/01-smooth-scroll.patch). Change with:
+         sudo ./rdpctl.sh scroll <percent> [invert]   e.g. 500 = 5 lines per notch -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>MACRDP_SCROLL_SPEED</key>
+        <string>500</string>
+        <key>MACRDP_SCROLL_INVERT</key>
+        <string>0</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>/opt/mac-rdp</string>
+
+    <!-- Required to bind port and access system resources -->
+    <key>UserName</key>
+    <string>root</string>
+
+    <key>GroupName</key>
+    <string>wheel</string>
+
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+</dict>
+</plist>

@@ -1,0 +1,152 @@
+--- a/xrdp/xrdp_wm.c
++++ b/xrdp/xrdp_wm.c
+@@ -1719,6 +1719,113 @@
+ }
+ 
+ /*****************************************************************************/
++/* Mac RDP Server scroll patch
++ *
++ * Stock xrdp ignores the wheel rotation amount and sends one VNC scroll
++ * "click" per RDP wheel event. A mouse notch (delta 120) therefore scrolls
++ * a single line on macOS (slow), while a precision touchpad, which sends
++ * many small deltas, fires a full click for every tiny movement (jumpy).
++ *
++ * Here the signed delta is accumulated and one VNC click is sent per
++ * WHEEL_DELTA (120) of rotation, scaled by MACRDP_SCROLL_SPEED (percent,
++ * default 500 = 5 clicks per notch).
++ * MACRDP_SCROLL_INVERT=1 flips the direction (natural scrolling).
++ * Both are read from the environment (set in the launchd plist).
++ */
++#define MACRDP_WHEEL_DELTA 120
++#define MACRDP_MAX_CLICKS_PER_EVENT 15
++
++static int g_macrdp_speed = -1;
++static int g_macrdp_invert = 0;
++static int g_macrdp_accum[2] = { 0, 0 };
++
++static void
++macrdp_wheel_init(void)
++{
++    char *v;
++
++    if (g_macrdp_speed >= 0)
++    {
++        return;
++    }
++    g_macrdp_speed = 500;
++    v = g_getenv("MACRDP_SCROLL_SPEED");
++    if (v != 0 && g_atoi(v) > 0)
++    {
++        g_macrdp_speed = g_atoi(v);
++    }
++    v = g_getenv("MACRDP_SCROLL_INVERT");
++    g_macrdp_invert = (v != 0 && g_atoi(v) != 0);
++    LOG(LOG_LEVEL_INFO, "Mac RDP scroll: speed %d%%, invert %d",
++        g_macrdp_speed, g_macrdp_invert);
++}
++
++static void
++macrdp_wheel(struct xrdp_wm *self, int device_flags, int horizontal)
++{
++    int delta;
++    int clicks;
++    int *acc;
++    int but_pos; /* button for positive rotation */
++    int but_neg; /* button for negative rotation */
++
++    macrdp_wheel_init();
++
++    /* 9-bit two's complement rotation value */
++    delta = device_flags & WheelRotationMask;
++    if (delta & PTRFLAGS_WHEEL_NEGATIVE)
++    {
++        delta -= 0x200;
++    }
++    if (delta == 0) /* client sent no amount: treat as one notch */
++    {
++        delta = (device_flags & PTRFLAGS_WHEEL_NEGATIVE) ?
++                -MACRDP_WHEEL_DELTA : MACRDP_WHEEL_DELTA;
++    }
++    if (g_macrdp_invert)
++    {
++        delta = -delta;
++    }
++
++    acc = &g_macrdp_accum[horizontal ? 1 : 0];
++    /* direction change: drop leftover motion so reversal is immediate */
++    if ((delta > 0 && *acc < 0) || (delta < 0 && *acc > 0))
++    {
++        *acc = 0;
++    }
++    *acc += delta * g_macrdp_speed / 100;
++
++    if (horizontal)
++    {
++        but_pos = 7; /* right */
++        but_neg = 6; /* left */
++    }
++    else
++    {
++        but_pos = 4; /* up */
++        but_neg = 5; /* down */
++    }
++
++    clicks = 0;
++    while (*acc >= MACRDP_WHEEL_DELTA && clicks < MACRDP_MAX_CLICKS_PER_EVENT)
++    {
++        xrdp_wm_mouse_click(self, 0, 0, but_pos, 0);
++        *acc -= MACRDP_WHEEL_DELTA;
++        clicks++;
++    }
++    while (*acc <= -MACRDP_WHEEL_DELTA && clicks < MACRDP_MAX_CLICKS_PER_EVENT)
++    {
++        xrdp_wm_mouse_click(self, 0, 0, but_neg, 0);
++        *acc += MACRDP_WHEEL_DELTA;
++        clicks++;
++    }
++    if (clicks >= MACRDP_MAX_CLICKS_PER_EVENT)
++    {
++        *acc = 0; /* don't let a huge flick queue up a backlog */
++    }
++}
++
++/*****************************************************************************/
+ static int
+ xrdp_wm_process_input_mouse(struct xrdp_wm *self, int device_flags,
+                             int x, int y)
+@@ -1766,17 +1873,10 @@
+         }
+     }
+ 
+-    /* vertical mouse wheel */
++    /* vertical mouse wheel (Mac RDP Server: delta-aware, see macrdp_wheel) */
+     if (device_flags & PTRFLAGS_WHEEL)
+     {
+-        if (device_flags & PTRFLAGS_WHEEL_NEGATIVE)
+-        {
+-            xrdp_wm_mouse_click(self, 0, 0, 5, 0);
+-        }
+-        else
+-        {
+-            xrdp_wm_mouse_click(self, 0, 0, 4, 0);
+-        }
++        macrdp_wheel(self, device_flags, 0);
+     }
+ 
+     /* horizontal mouse wheel */
+@@ -1787,14 +1887,7 @@
+      */
+     if (device_flags & PTRFLAGS_HWHEEL)
+     {
+-        if (device_flags & PTRFLAGS_WHEEL_NEGATIVE)
+-        {
+-            xrdp_wm_mouse_click(self, 0, 0, 6, 0);
+-        }
+-        else
+-        {
+-            xrdp_wm_mouse_click(self, 0, 0, 7, 0);
+-        }
++        macrdp_wheel(self, device_flags, 1);
+     }
+ 
+     return 0;
